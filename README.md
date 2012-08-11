@@ -17,6 +17,9 @@ Coming soon. FIXME
 
 otr-message uses the following (incomplete!) grammar to describe the format of OTR messages:
 
+BASE_64(...) is a base64 representation of its arguments
+VALUE(field[n]) is the value of the nth field in this rule, to be used as an attribute. n indexes from 0.
+
 ```
 otr ::= query | error | encoded | tagged_plaintext | plaintext
 query ::= query_prefix versions '?'
@@ -45,8 +48,8 @@ otr_prefix ::= '?OTR:'
 otr_byte ::= char
 otr_short ::= byte{2}
 otr_int ::= byte{4}
-otr_mpi ::= otr_int [^\x00]{otr_int_val}
-otr_data ::= otr_int byte{otr_int_val}
+otr_mpi ::= otr_int [^\x00]{VALUE(field[0])}
+otr_data ::= otr_int byte{VALUE(field[0])}
 otr_ctr ::= byte{8}
 otr_mac ::= byte{20}
 otr_pubkey ::= '\x00\x00' otr_mpi{4}
@@ -55,13 +58,15 @@ dh_commit_msg ::= '\x00\x02' 'x02' otr_data otr_data
 dh_key_msg ::= '\x00\x02' '\x0a' otr_mpi
 reveal_signature_msg ::= '\x00\x02' '\x11' otr_data otr_data otr_mac
 signature_msg ::= '\x00\x02' '\x12' otr_data otr_mac
-v1_ke_msg ::= FIXME
+v1_ke_msg ::= otr_prefix BASE_64(otr_short(0x0001) otr_byte(0x0a) otr_byte(0x01 | 0x00) otr_mpi{4} otr_int otr_mpi (otr_byte{VALUE(field[4])}){2})
+// The second otr_byte of v1_ke_msg is 0x01 if this message is being sent in reply to a key exchange message that was just
+// received. That probably belongs in the state machine.
 data_msg ::= '\x00\x02' '\x03' otr_byte otr_int otr_int otr_mpi otr_ctr otr_data otr_mac otr_data
 ```
 
 ## License ##
 
-Copyright (c) 2011, Meredith L. Patterson &lt;clonearmy@gmail.com&gt;
+Copyright (c) 2011-2012, Meredith L. Patterson &lt;mlp@thesmartpolitenerd.com&gt;
 All rights reserved.
 
 Redistribution and use in source and binary forms, with or without
