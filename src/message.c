@@ -24,6 +24,10 @@ bool validate_data_mac(HParseResult *p);
 
 const HParsedToken* get_smp_tlvs(const HParseResult *t);
 
+const HParsedToken* get_r(const HParseResult *t);
+
+const HParsedToken* get_otr_encoded_raw(const HParseResult *t);
+
 const HParser* init_parser() {
   static const HParser *otr_message = NULL;
   if (otr_message)
@@ -53,7 +57,7 @@ const HParser* init_parser() {
 
   const HParser *v1_p = h_optional(h_ch('?'));
 
-  const HParser *vN_p = h_sequence(h_ch('v'),
+  const HParser *vN_p = h_sequence(h_ignore(h_ch('v')),
 				   h_many(h_not_in("?", 1)),
 				   NULL);
 
@@ -61,9 +65,9 @@ const HParser* init_parser() {
 				       vN_p,
 				       NULL);
 
-  otr_query = h_sequence(otr_prefix,
+  otr_query = h_sequence(h_ignore(otr_prefix),
 			 versions,
-			 h_ch('?'),
+			 h_ignore(h_ch('?')),
 			 NULL);
 
   /**
@@ -73,7 +77,7 @@ const HParser* init_parser() {
 
   const HParser *error_prefix = h_token((const uint8_t*)"?OTR Error", 9);
 
-  otr_error = h_sequence(error_prefix,
+  otr_error = h_sequence(h_ignore(error_prefix),
 			 h_many(h_uint8()),
 			 NULL);
   
@@ -83,44 +87,32 @@ const HParser* init_parser() {
   const HParser *otr_encoded = NULL;
 
   const HParser *dh_commit_msg = h_sequence(otr_this_version,
-					    h_int_range(h_uint8(), 2, 2),
+					    h_ignore(h_int_range(h_uint8(), 2, 2)),
 					    otr_data,
 					    otr_data,
 					    NULL);
 
   const HParser *dh_key_msg = h_sequence(otr_this_version,
-					 h_int_range(h_uint8(), '\x0a', '\x0a'),
+					 h_ignore(h_int_range(h_uint8(), '\x0a', '\x0a')),
 					 otr_mpi,
 					 NULL);
   
   const HParser *reveal_signature_msg = h_sequence(otr_this_version,
-						   h_int_range(h_uint8(), '\x11', '\x11'),
-						   otr_data,
+						   h_ignore(h_int_range(h_uint8(), '\x11', '\x11')),
+						   h_action(otr_data,
+							    get_r), // a 128-bit value encoded as otr_data
 						   otr_data,
 						   otr_mac,
 						   NULL);
 
   const HParser *signature_msg = h_sequence(otr_this_version,
-					    h_int_range(h_uint8(), '\x12', '\x12'),
+					    h_ignore(h_int_range(h_uint8(), '\x12', '\x12')),
 					    otr_data,
 					    otr_mac,
 					    NULL);
-
-  /* This is not exactly right -- everything between the prefix and the period is base64'ed */
-  const HParser *v1_ke_msg = h_attr_bool(h_sequence(otr_prefix,
-						    h_int_range(h_uint16(), 1, 1),
-						    h_int_range(h_uint8(), '\x0a', '\x0a'),
-						    h_int_range(h_uint8(), 0, 1),
-						    h_repeat_n(otr_mpi, 4),
-						    h_uint32(),
-						    otr_mpi,
-						    h_many1(h_uint8()),
-						    h_ch('.'),
-						    NULL),
-					 validate_v1_ke_msg);
 				
   const HParser *data_msg = h_attr_bool(h_sequence(otr_this_version,
-						   h_int_range(h_uint8(), 3, 3),
+						   h_ignore(h_int_range(h_uint8(), 3, 3)),
 						   h_int_range(h_uint8(), 0, 1),
 						   h_int_range(h_uint32(), 1, UINT_MAX),
 						   h_int_range(h_uint32(), 1, UINT_MAX),
@@ -133,7 +125,7 @@ const HParser* init_parser() {
 						   NULL),
 					validate_data_mac);
 
-  /* TLVs, will be used in data_msg eventually */
+  /* plaintext and TLVs, will be used in data_msg eventually */
   const HParser *base_tlv = h_sequence(h_int_range(h_uint16(), 0, 1),
 				       h_length_value(h_uint16(), h_uint8()),
 				       NULL);
@@ -147,21 +139,26 @@ const HParser* init_parser() {
 				    smp_tlv,
 				    NULL);
 
-  const HParser *plaintext = h_sequence(h_many1(h_not_in("\x00", 1)), // not actually right, that should be "utf8"
-					h_optional(h_sequence(h_ch('\x00'),
+  const HParser *plaintext = h_sequence(h_many1(h_not_in("\x00", 1)), // FIXME that should be "many1 utf8"
+					h_optional(h_sequence(h_ignore(h_ch('\x00')),
 							      h_many(otr_tlv),
 							      NULL)),
 					NULL);					
- 
-  otr_encoded = h_sequence(otr_prefix,
-			   h_choice(dh_commit_msg,
-				    dh_key_msg,
-				    reveal_signature_msg,
-				    signature_msg,
-				    v1_ke_msg,
-				    data_msg,
-				    NULL),
+  
+  const HParser *otr_encoded_raw = h_choice(dh_commit_msg,
+					    dh_key_msg,
+					    reveal_signature_msg,
+					    signature_msg,
+					    data_msg,
+					    NULL);
+
+  otr_encoded = h_sequence(h_ignore(otr_prefix),
+			   h_ignore(h_ch(':')),
+			   h_action(base64,
+				    get_otr_encoded_raw),
+			   h_ignore(h_ch('.')),
 			   NULL);
+
 
   /**
    * OTR tagged plaintext messages 
@@ -183,11 +180,28 @@ const HParser* init_parser() {
 				    whitespace_tag,
 				    h_optional(h_many(h_uint8())),
 				    NULL);
-  
+  /**
+   * OTR v1 key exchange message
+   */
+  /* This is not exactly right -- everything between the prefix and the period is base64'ed */
+  const HParser *v1_ke_msg = h_attr_bool(h_sequence(otr_prefix,
+						    h_int_range(h_uint16(), 1, 1),
+						    h_int_range(h_uint8(), '\x0a', '\x0a'),
+						    h_int_range(h_uint8(), 0, 1),
+						    h_repeat_n(otr_mpi, 4),
+						    h_uint32(),
+						    otr_mpi,
+						    h_many1(h_uint8()),
+						    h_ch('.'),
+						    NULL),
+					 validate_v1_ke_msg);
+
+  /* top-level OTR message handler */
   otr_message = h_sequence(h_choice(otr_query,
 				    otr_error,
 				    otr_encoded,
 				    otr_tagged_plaintext,
+				    v1_ke_msg,
 				    NULL),
 			   h_end_p(),
 			   NULL);

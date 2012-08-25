@@ -1,13 +1,15 @@
 # otr-message #
 
-otr-message is a Javascript parser for the message format used in the [Off-the-Record Messaging](http://www.cypherpunks.ca/otr/) instant messaging encryption system, [version 2](http://www.cypherpunks.ca/otr/Protocol-v2-3.0.0.html).
+otr-message is a set of parsers for the message format used in the [Off-the-Record Messaging](http://www.cypherpunks.ca/otr/) instant messaging encryption system, [version 2](http://www.cypherpunks.ca/otr/Protocol-v2-3.0.0.html).
 
 ## Installation ##
 
 Coming soon. FIXME
 
 ### Dependencies ###
-ReParse. Or possibly the Javascript port of Parsec. Watch this space for updates.
+Javascript: jsparse. Or, rather, it will be when I rewrite it; the version in lib/ was written with ReParse but that wasn't robust enough.
+
+C: hammer.
 
 ## API ##
 
@@ -22,9 +24,8 @@ VALUE(field[n]) is the value of the nth field in this rule, to be used as an att
 AES128_CTR(...) is the AES-128 encryption of its arguments in counter mode. I don't know whether we should represent encryption *parameters* in this attribute representation or not; "generation is parsing backward" doesn't exactly apply when your attribute functions are one-way :(
 
 ```
-otr ::= query | error | encoded | tagged_plaintext | plaintext
-query ::= query_prefix versions '?'
-query_prefix ::= '?OTR'
+otr ::= query | error | encoded | tagged_plaintext
+query ::= otr_prefix versions '?'
 versions ::= v1_p vN_p
 v1_p ::= ['?']
 vN_p ::= 'v' *otr_byte
@@ -34,8 +35,8 @@ error ::= error_prefix string
 error_prefix ::= '?OTR Error:'
 plaintext ::= utf8 [otr_byte(0x00) *tlv]
 tlv ::= base_tlv | smp_tlv
-base_tlv ::= otr_short(0x0000 | 0x0001) tlv_length VALUE(field[1])*VALUE(field[1])otr_byte
-smp_tlv ::= otr_short(0x0002 | 0x0003 | 0x0004 | 0x0005 | 0x0006) tlv_length smp_tlv_data
+base_tlv ::= otr_short(0x0000 | 0x0001) otr_short VALUE(field[1])*VALUE(field[1])otr_byte
+smp_tlv ::= otr_short(0x0002 | 0x0003 | 0x0004 | 0x0005 | 0x0006) otr_short smp_tlv_data
 // the length of smp_tlv_data is tlv_length
 smp_tlv_data ::= otr_int VALUE(field[0])*VALUE(field[0])otr_mpi
 tlv_length ::= otr_short
